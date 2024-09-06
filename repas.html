@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestion des Repas et Pauses - CDL</title>
+    <link rel="manifest" href="manifest.json">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f3f3f3;
+        }
+        header {
+            background-color: #20B2AA;
+            color: white;
+            text-align: center;
+            padding: 10px;
+        }
+        .container {
+            padding: 20px;
+            display: none;
+        }
+        .login-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        .login-container input {
+            padding: 10px;
+            margin: 5px;
+            width: 200px;
+        }
+        .login-container button {
+            padding: 10px 20px;
+            background-color: #20B2AA;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        .planning {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+        .agent-card {
+            border: 1px solid #ddd;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .agent-card.paused-immediate {
+            background-color: #FFFF99;
+        }
+        .agent-card.paused-scheduled {
+            background-color: #98FB98;
+        }
+        .status {
+            font-size: 0.9em;
+            color: #555;
+            margin-top: 5px;
+        }
+        .summary {
+            font-size: 0.8em;
+            color: #333;
+            margin-top: 10px;
+            text-align: left;
+        }
+        .notification {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: #FF6347;
+            color: white;
+            padding: 10px;
+            border-radius: 4px;
+            display: none;
+        }
+        .time-input {
+            margin-top: 10px;
+            width: 45%;
+            margin-right: 5px;
+        }
+        .date-display {
+            text-align: center;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .activity-container {
+            margin-bottom: 20px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: #e0f7fa;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        .activity-item {
+            font-size: 0.9em;
+            padding: 5px;
+            border-bottom: 1px solid #ccc;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>Gestion des Repas et Pauses - Centre Diagnostic de Libreville</h1>
+</header>
+
+<div class="login-container">
+    <input type="text" id="username" placeholder="Login">
+    <input type="password" id="password" placeholder="Mot de passe">
+    <button onclick="login()">Connexion</button>
+</div>
+
+<div class="container">
+    <div class="activity-container" id="activity-container">
+        <h3>Résumé des Activités</h3>
+        <div id="activity-summary"></div>
+    </div>
+
+    <div class="planning">
+        <!-- Les cartes des agents seront insérées dynamiquement ici -->
+    </div>
+</div>
+
+<div class="notification" id="notification">
+    Un agent est revenu de pause.
+</div>
+
+<script>
+    const agentsInPause = new Map();
+
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('service-worker.js').then(function(registration) {
+            console.log('Service Worker registered with scope:', registration.scope);
+        }).catch(function(error) {
+            console.error('Service Worker registration failed:', error);
+        });
+    }
+
+    function requestNotificationPermission() {
+        if ('Notification' in window) {
+            Notification.requestPermission().then(permission => {
+                if (permission === 'granted') {
+                    console.log('Notification permission granted.');
+                }
+            });
+        }
+    }
+
+    function login() {
+        const username = document.getElementById('username').value;
+        const password = document.getElementById('password').value;
+        if ((username === 'admin1' || username === 'admin2') && password === '123456') {
+            document.querySelector('.login-container').style.display = 'none';
+            document.querySelector('.container').style.display = 'block';
+            requestNotificationPermission();
+        } else {
+            alert('Login ou mot de passe incorrect.');
+        }
+    }
+
+    function schedulePause(agent) {
+        const hour = document.getElementById(`hour-${agent}`).value;
+        const minute = document.getElementById(`minute-${agent}`).value;
+        const currentTime = new Date();
+        const pauseTime = new Date(currentTime);
+        pauseTime.setHours(hour);
+        pauseTime.setMinutes(minute);
+        pauseTime.setSeconds(0);
+
+        if (pauseTime <= currentTime) {
+            alert("L'heure de pause doit être dans le futur.");
+            return;
+        }
+
+        const timeUntilPause = pauseTime - currentTime;
+
+        setTimeout(() => {
+            assignPauseNow(agent, true);
+        }, timeUntilPause);
+
+        alert(`Pause programmée pour ${agent} à ${pauseTime.toLocaleTimeString()}.`);
+        logSummary(agent, `Pause programmée à ${pauseTime.toLocaleTimeString()}.`);
+        addActivityToSummary(`Pause programmée pour ${agent} à ${pauseTime.toLocaleTimeString()}`);
+        document.getElementById(`agent-${agent}`).classList.add('paused-scheduled');
+    }
+
+    function assignPauseNow(agent, isScheduled = false) {
+        const currentTime = new Date();
+        const returnTime = new Date(currentTime.getTime() + 60 * 60 * 1000);
+        const agentStatus = document.getElementById(`status-${agent}`);
+        agentStatus.innerHTML = `En pause - Départ: ${currentTime.toLocaleTimeString()} - Retour: ${returnTime.toLocaleTimeString()}<br>Bonne appétit !`;
+        agentsInPause.set(agent, returnTime);
+        document.getElementById(`agent-${agent}`).classList.add(isScheduled ? 'paused-scheduled' : 'paused-immediate');
+        logSummary(agent, `Pause ${isScheduled ? 'programmée' : 'immédiate'} à ${currentTime.toLocaleTimeString()}. Retour prévu à ${returnTime.toLocaleTimeString()}.`);
+        addActivityToSummary(`Pause ${isScheduled ? 'programmée' : 'immédiate'} pour ${agent} à ${currentTime.toLocaleTimeString()}`);
+        sendNotification(`Agent ${agent} en pause. Retour prévu à ${returnTime.toLocaleTimeString()}`);
+        setTimeout(() => {
+            agentsInPause.delete(agent);
+            document.getElementById(`agent-${agent}`).classList.remove(isScheduled ? 'paused-scheduled' : 'paused-immediate');
+            agentStatus.innerHTML = 'En service';
+            showNotification();
+            logSummary(agent, `Agent de retour de pause à ${new Date().toLocaleTimeString()}.`);
+            addActivityToSummary(`Agent ${agent} de retour de pause à ${new Date().toLocaleTimeString()}`);
+            sendNotification(`Agent ${agent} est de retour de pause.`);
+        }, 3600000);
+    }
+
+    function sendNotification(message) {
+        if ('Notification' in window && Notification.permission === 'granted') {
+            navigator.serviceWorker.ready.then(registration => {
+                registration.showNotification('Centre Diagnostic de Libreville', {
+                    body: message,
+                    icon: 'icon.png'
+                });
+            });
+        }
+    }
+
+    function logSummary(agent, message) {
+        const summary = document.getElementById(`summary-${agent}`);
+        const timestamp = new Date().toLocaleTimeString();
+        const currentDate = new Date().toLocaleDateString();
+        summary.innerHTML += `<div>${timestamp} (${currentDate}): ${message}</div>`;
+    }
+
+    function showNotification() {
+        const notification = document.getElementById('notification');
+        notification.style.display = 'block';
+        setTimeout(() => {
+            notification.style.display = 'none';
+        }, 3000);
+    }
+
+    function addActivityToSummary(activity) {
+        const activitySummary = document.getElementById('activity-summary');
+        const activityItem = document.createElement('div');
+        activityItem.className = 'activity-item';
+        activityItem.innerText = activity;
+        activitySummary.prepend(activityItem);
+    }
+
+    function createAgentCards(agents) {
+        return agents.map(agent => `
+            <div class="agent-card" id="agent-${agent}">
+                ${agent}
+                <div class="date-display">${new Date().toLocaleDateString()}</div>
+                <div class="status" id="status-${agent}">En service</div>
+                <div>
+                    Heure : 
+                    <select id="hour-${agent}" class="time-input">
+                        ${Array.from({length: 24}, (_, i) => `<option value="${i}">${i.toString().padStart(2, '0')}</option>`).join('')}
+                    </select>
+                    Minutes : 
+                    <select id="minute-${agent}" class="time-input">
+                        ${Array.from({length: 60}, (_, i) => `<option value="${i}">${i.toString().padStart(2, '0')}</option>`).join('')}
+                    </select>
+                </div>
+                <button onclick="schedulePause('${agent}')">Programmer Pause</button>
+                <button onclick="assignPauseNow('${agent}')">Pause Immédiate</button>
+                <div class="summary" id="summary-${agent}"></div>
+            </div>
+        `).join('');
+    }
+
+    document.querySelector('.planning').innerHTML = createAgentCards([
+        "Vivaldie", "Lexia", "Perrine", "Dominique", "Kevine", "Charlotte", "Esperance", "Ingrid",
+        "Katrina", "Ruphanie", "Rebecca", "Mistral", "Leona", "Gontrand", "Lorene", "Carmen", "Emma", "Anzimath"
+    ]);
+</script>
+
+</body>
+</html>
